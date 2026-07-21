@@ -3,7 +3,12 @@ from pydantic import BaseModel
 import joblib
 import pandas as pd
 import os
-from typing import List
+from typing import List, Optional
+
+# Import the live capture manager
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from live_monitor.capture_manager import get_capture_manager
 
 app = FastAPI(title="CipherGuard Backend")
 
@@ -25,7 +30,7 @@ if model is None:
         "ids_classifier.pkl not found. Run train.py first."
     )
 
-# Running statistics
+# Running statistics (for desktop agent /predict endpoint)
 latest_results = {
     "total_flows": 0,
     "safe": 0,
@@ -37,6 +42,11 @@ latest_results = {
 
 class FlowData(BaseModel):
     flows: List[dict]
+
+
+class StartRequest(BaseModel):
+    interface: str = "Ethernet 5"
+    batch_duration: int = 10
 
 
 @app.get("/")
@@ -72,7 +82,13 @@ def predict(data: FlowData):
 
 @app.get("/latest")
 def latest():
-
+    """
+    Returns the latest results from the live capture manager.
+    If capture is not running, returns the desktop agent results.
+    """
+    capture_mgr = get_capture_manager()
+    if capture_mgr.running:
+        return capture_mgr.get_results()
     return latest_results
 
 
@@ -93,20 +109,66 @@ def reset():
 
 
 @app.post("/start")
-def start_monitoring():
+def start_monitoring(request: Optional[StartRequest] = None):
+    """
+    Start live network capture on the specified interface.
+    Default interface: "Ethernet 5"
+    """
+    interface = "Ethernet 5"
+    batch_duration = 10
 
-    global latest_results
+    if request is not None:
+        interface = request.interface
+        batch_duration = request.batch_duration
 
-    latest_results["status"] = "Running"
+    capture_mgr = get_capture_manager()
 
-    return latest_results
+    if capture_mgr.running:
+        return {
+            "status": "Already Running",
+            "message": f"Capture is already running on {capture_mgr.interface}"
+        }
+
+    success = capture_mgr.start(interface, batch_duration)
+
+    if success:
+        return {
+            "status": "Running",
+            "message": f"Live capture started on {interface}",
+            "interface": interface
+        }
+    else:
+        return {
+            "status": "Error",
+            "message": "Failed to start capture"
+        }
 
 
 @app.post("/stop")
 def stop_monitoring():
+    """
+    Stop live network capture.
+    """
+    capture_mgr = get_capture_manager()
 
-    global latest_results
+    if not capture_mgr.running:
+        return {
+            "status": "Stopped",
+            "message": "Capture is not running"
+        }
 
-    latest_results["status"] = "Stopped"
+    capture_mgr.stop()
 
-    return latest_results
+    return {
+        "status": "Stopped",
+        "message": "Live capture stopped",
+        "results": capture_mgr.get_results()
+    }
+
+
+@app.get("/interfaces")
+def list_interfaces():
+    """List available network interfaces."""
+    import psutil
+    interfaces = list(psutil.net_if_addrs().keys())
+    return {"interfaces": interfaces}

@@ -28,6 +28,11 @@ st_autorefresh(interval=5000, key="live_refresh")
 if "threat_history" not in st.session_state:
     st.session_state.threat_history = []
 
+if "monitoring_active" not in st.session_state:
+    st.session_state.monitoring_active = False
+
+BACKEND_URL = "http://127.0.0.1:8000"
+
 
 st.markdown("""
 <div style="
@@ -142,27 +147,69 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    st.subheader("🎛 Monitoring Controls")
 
-    col1, col2 = st.columns(2)
+    # ----------------------------------------------------
+    # LIVE MONITORING CONTROLS (only show in Live Mode)
+    # ----------------------------------------------------
+    if mode == "🌐 Live Monitoring":
+        st.subheader("🎛 Live Capture Controls")
 
-    with col1:
-        if st.button("▶ Start"):
-            try:
-                requests.post("http://127.0.0.1:8000/start")
-                st.success("Monitoring Started")
-            except:
-                st.error("Backend Offline")
+        # Network interface selection
+        try:
+            resp = requests.get(f"{BACKEND_URL}/interfaces", timeout=2)
+            available_interfaces = resp.json().get("interfaces", ["Ethernet 5"])
+        except:
+            available_interfaces = ["Ethernet 5"]
 
-    with col2:
-        if st.button("⏹ Stop"):
-            try:
-                requests.post("http://127.0.0.1:8000/stop")
-                st.warning("Monitoring Stopped")
-            except:
-                st.error("Backend Offline")
+        selected_interface = st.selectbox(
+            "🌐 Network Interface",
+            available_interfaces,
+            index=available_interfaces.index("Ethernet 5") if "Ethernet 5" in available_interfaces else 0
+        )
 
-    st.markdown("---")
+        st.caption(f"Selected: {selected_interface}")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("▶ Start Capture", use_container_width=True, disabled=st.session_state.monitoring_active):
+                try:
+                    resp = requests.post(
+                        f"{BACKEND_URL}/start",
+                        json={"interface": selected_interface, "batch_duration": 10},
+                        timeout=5
+                    )
+                    if resp.status_code == 200:
+                        st.session_state.monitoring_active = True
+                        st.success("✅ Capture Started")
+                    else:
+                        st.error(f"❌ Error: {resp.json().get('message', 'Unknown')}")
+                except requests.exceptions.ConnectionError:
+                    st.error("❌ Backend Offline - Start uvicorn first")
+                except Exception as e:
+                    st.error(f"❌ Error: {e}")
+
+        with col2:
+            if st.button("⏹ Stop Capture", use_container_width=True, disabled=not st.session_state.monitoring_active):
+                try:
+                    resp = requests.post(f"{BACKEND_URL}/stop", timeout=5)
+                    if resp.status_code == 200:
+                        st.session_state.monitoring_active = False
+                        st.warning("⏹ Capture Stopped")
+                    else:
+                        st.error(f"❌ Error: {resp.json().get('message', 'Unknown')}")
+                except requests.exceptions.ConnectionError:
+                    st.error("❌ Backend Offline")
+                except Exception as e:
+                    st.error(f"❌ Error: {e}")
+
+        # Show current monitoring status
+        if st.session_state.monitoring_active:
+            st.success("🟢 Live Capture is ACTIVE")
+        else:
+            st.warning("🔴 Live Capture is STOPPED")
+
+        st.markdown("---")
 
     st.subheader("ℹ️ About System")
 
@@ -193,38 +240,92 @@ if mode == "🌐 Live Monitoring":
     st.header("🌐 Live Monitoring Dashboard")
 
     try:
-
-        response = requests.get("http://127.0.0.1:8000/latest")
-
+        response = requests.get(f"{BACKEND_URL}/latest", timeout=3)
         data = response.json()
 
-        total = data["total_flows"]
-        safe = data["safe"]
-        threats = data["threats"]
+        total = data.get("total_flows", 0)
+        safe = data.get("safe", 0)
+        threats = data.get("threats", 0)
+        status = data.get("status", "Stopped")
+        interface = data.get("interface", "N/A")
+        last_error = data.get("last_error")
 
-        col1, col2, col3 = st.columns(3)
+        # Status indicator
+        if status == "Running":
+            st.success(f"🟢 Live Capture ACTIVE on **{interface}**")
+        else:
+            st.warning("🔴 Live Capture is STOPPED (press ▶ Start Capture to begin)")
+
+        if last_error:
+            st.error(f"⚠️ Capture Error: {last_error}")
+
+        # Metrics row
+        col1, col2, col3, col4 = st.columns(4)
 
         with col1:
             st.metric("🌐 Total Flows", total)
 
         with col2:
-            st.metric("✅ Safe", safe)
+            st.metric("✅ Safe Connections", safe)
 
         with col3:
-            st.metric("🚨 Threats", threats)
+            st.metric("🚨 Threats Detected", threats)
 
+        with col4:
+            detection_rate = (threats / total * 100) if total > 0 else 0
+            st.metric("⚠️ Detection Rate", f"{detection_rate:.1f}%")
+
+        # Threat alert
         if threats > 0:
-            st.error("🚨 Threats Detected")
+            st.error(f"🚨 SECURITY ALERT: {threats} malicious flow(s) detected!")
+        elif total > 0:
+            st.success("✅ Network is Secure - No threats detected")
         else:
-            st.success("✅ Network Secure")
+            st.info("⏳ Waiting for network traffic...")
 
-        st.subheader("Latest Predictions")
+        # Latest predictions
+        predictions = data.get("predictions", [])
+        if predictions:
+            st.subheader("📊 Latest Flow Predictions")
+            threat_count_display = sum(1 for p in predictions if p == 1)
+            safe_count_display = len(predictions) - threat_count_display
 
-        st.write(data["predictions"])
+            pred_col1, pred_col2 = st.columns(2)
+            with pred_col1:
+                st.metric("🟢 Safe Flows (last 100)", safe_count_display)
+            with pred_col2:
+                st.metric("🔴 Threat Flows (last 100)", threat_count_display)
 
-    except Exception:
+            # Mini pie chart
+            if threat_count_display > 0 or safe_count_display > 0:
+                pie = px.pie(
+                    names=["Safe", "Threats"],
+                    values=[safe_count_display, threat_count_display],
+                    title="Recent Traffic Classification",
+                    hole=0.5,
+                    color_discrete_sequence=["#2e8b57", "#ff4d4d"]
+                )
+                pie.update_traces(textposition="inside", textinfo="percent+label")
+                pie.update_layout(showlegend=False, title_x=0.5)
+                st.plotly_chart(pie, use_container_width=True)
 
-        st.warning("Desktop Agent is not running.")
+        # Threat history trend
+        if st.session_state.threat_history:
+            st.markdown("---")
+            st.subheader("📈 Threat Detection Trend")
+            history_df = pd.DataFrame(st.session_state.threat_history)
+            if not history_df.empty:
+                trend = px.line(
+                    history_df, x="Time", y="Threats",
+                    markers=True, title="Threats Over Time"
+                )
+                st.plotly_chart(trend, use_container_width=True)
+
+    except requests.exceptions.ConnectionError:
+        st.error("❌ Backend server is not running.")
+        st.info("Start the backend with: `cd backend && uvicorn api:app --reload --port 8000`")
+    except Exception as e:
+        st.error(f"❌ Error fetching live data: {e}")
 
     st.stop()
 
