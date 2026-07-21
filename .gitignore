@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+
+*.pcap
+*.pcapng
+
+*.csv
+
+ids_classifier.pkl
+
+.streamlit/secrets.toml
+
+.env
+
+.vscode/
