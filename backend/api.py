@@ -2,19 +2,36 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import joblib
 import pandas as pd
+import os
 from typing import List
 
 app = FastAPI(title="CipherGuard Backend")
 
-# Load AI model
-model = joblib.load("../ids_classifier.pkl")
+# Load AI model - try multiple paths
+model_paths = [
+    "ids_classifier.pkl",
+    "../ids_classifier.pkl",
+    os.path.join(os.path.dirname(__file__), "..", "ids_classifier.pkl")
+]
+
+model = None
+for path in model_paths:
+    if os.path.exists(path):
+        model = joblib.load(path)
+        break
+
+if model is None:
+    raise FileNotFoundError(
+        "ids_classifier.pkl not found. Run train.py first."
+    )
 
 # Running statistics
 latest_results = {
     "total_flows": 0,
     "safe": 0,
     "threats": 0,
-    "predictions": []
+    "predictions": [],
+    "status": "Running"
 }
 
 
@@ -64,8 +81,6 @@ def reset():
 
     global latest_results
 
-    latest_results["status"] = "Running"
-
     latest_results = {
         "status": "Stopped",
         "total_flows": 0,
@@ -75,6 +90,7 @@ def reset():
     }
 
     return latest_results
+
 
 @app.post("/start")
 def start_monitoring():

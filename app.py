@@ -29,7 +29,6 @@ if "threat_history" not in st.session_state:
     st.session_state.threat_history = []
 
 
-
 st.markdown("""
 <div style="
 background: linear-gradient(135deg, #0f172a, #1e40af);
@@ -77,11 +76,8 @@ Behavior-based intrusion detection using NFStream and Machine Learning
 MODEL_PATH = "ids_classifier.pkl"
 
 if not os.path.exists(MODEL_PATH):
-
     st.error("❌ Trained AI model not found.")
-
     st.info("Run train.py to generate ids_classifier.pkl")
-
     st.stop()
 
 model = joblib.load(MODEL_PATH)
@@ -145,28 +141,26 @@ with st.sidebar:
         ]
     )
 
-    import requests
+    st.markdown("---")
+    st.subheader("🎛 Monitoring Controls")
 
-st.markdown("---")
-st.subheader("🎛 Monitoring Controls")
+    col1, col2 = st.columns(2)
 
-col1, col2 = st.columns(2)
+    with col1:
+        if st.button("▶ Start"):
+            try:
+                requests.post("http://127.0.0.1:8000/start")
+                st.success("Monitoring Started")
+            except:
+                st.error("Backend Offline")
 
-with col1:
-    if st.button("▶ Start"):
-        try:
-            requests.post("http://127.0.0.1:8000/start")
-            st.success("Monitoring Started")
-        except:
-            st.error("Backend Offline")
-
-with col2:
-    if st.button("⏹ Stop"):
-        try:
-            requests.post("http://127.0.0.1:8000/stop")
-            st.warning("Monitoring Stopped")
-        except:
-            st.error("Backend Offline")
+    with col2:
+        if st.button("⏹ Stop"):
+            try:
+                requests.post("http://127.0.0.1:8000/stop")
+                st.warning("Monitoring Stopped")
+            except:
+                st.error("Backend Offline")
 
     st.markdown("---")
 
@@ -190,15 +184,9 @@ with col2:
 
     st.caption("Academic Research Prototype")
 
-
-
-    st.markdown("---")
-
-st.caption("Academic Research Prototype")
-
-
-
-# ← Notice this line is OUTSIDE the sidebar
+# ----------------------------------------------------
+# LIVE MONITORING MODE
+# ----------------------------------------------------
 
 if mode == "🌐 Live Monitoring":
 
@@ -253,14 +241,12 @@ if uploaded_file is not None:
         with open(temp_pcap, "wb") as f:
             f.write(uploaded_file.getbuffer())
 
-
         streamer = NFStreamer(
             source=temp_pcap,
             statistical_analysis=True
         )
 
         df = streamer.to_pandas()
-
 
         if os.path.exists(temp_pcap):
             os.remove(temp_pcap)
